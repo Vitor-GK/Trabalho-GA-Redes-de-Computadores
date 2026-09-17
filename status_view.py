@@ -1,4 +1,3 @@
-# TODO: importar a instância compartilhada de state.py do grupo
 from state import state
 
 
@@ -33,8 +32,6 @@ def monitorar_em_loop(intervalo_segundos=5):
 
 
 if __name__ == "__main__":
-    # Permite rodar `python status_view.py` isoladamente para testar a
-    # formatação com dados fake, sem depender do resto do sistema.
     from state import NetworkState
 
     fake = NetworkState()
@@ -43,5 +40,5 @@ if __name__ == "__main__":
     fake.atualizar_arquivo("peer_B", "relatorio.pdf", 20480)
     fake.registrar_peer("peer_C")
 
-    state = fake  # sobrescreve só para este teste manual
+    state = fake  
     imprimir_status()

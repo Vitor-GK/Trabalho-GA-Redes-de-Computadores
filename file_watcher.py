@@ -2,8 +2,8 @@ import os
 import threading
 import time
 
-# TODO: importar de config.py do grupo
-TMP_DIR = "tmp"
+from config import PASTA_TMP as TMP_DIR
+
 INTERVALO_VERIFICACAO = 2.0
 
 _ignorar_proxima_varredura = set()
@@ -61,3 +61,10 @@ class FileWatcher:
                 self._on_removido(nome)
 
             self._estado_anterior = atual
+
+
+def inicia_watcher(pasta, on_arquivo_adicionado, on_arquivo_removido):
+    """Cria e inicia um FileWatcher, devolvendo o objeto (para poder chamar .parar() depois)."""
+    watcher = FileWatcher(on_arquivo_adicionado, on_arquivo_removido)
+    watcher.iniciar()
+    return watcher

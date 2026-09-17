@@ -1,8 +1,6 @@
 import os
 
-# TODO: importar de config.py do grupo
-TMP_DIR = "tmp"
-CHUNK_SIZE = 1024
+from config import PASTA_TMP as TMP_DIR, TAMANHO_PEDACO as CHUNK_SIZE
 
 _buffers_recebendo = {}
 
@@ -52,3 +50,9 @@ def apagar_arquivo(nome_arquivo):
         os.remove(caminho(nome_arquivo))
     except FileNotFoundError:
         pass
+
+
+def lista_arquivos():
+    """Retorna a lista de nomes de arquivos atualmente na pasta TMP_DIR."""
+    os.makedirs(TMP_DIR, exist_ok=True)
+    return [nome for nome in os.listdir(TMP_DIR) if os.path.isfile(caminho(nome))]
