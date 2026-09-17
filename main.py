@@ -1,3 +1,8 @@
+# Trabalho GA - Redes de Computadores
+
+# Integrantes: Gabriel marcon e Vitor Kockhann
+
+
 import os
 
 import config
