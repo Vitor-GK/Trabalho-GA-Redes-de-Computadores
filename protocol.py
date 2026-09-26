@@ -5,6 +5,7 @@ PEDIR = "PEDIR"
 DADOS = "DADOS"
 REMOVIDO = "REMOVIDO"
 LISTA = "LISTA"
+CONFIRMA = "CONFIRMA"
 
 SEPARADOR = "|"
 
@@ -28,6 +29,10 @@ def codifica_removido(nome):
 
 def codifica_lista():
     return LISTA.encode("utf-8")
+
+
+def codifica_confirma(tipo_confirmado, nome):
+    return f"{CONFIRMA}{SEPARADOR}{tipo_confirmado}{SEPARADOR}{nome}".encode("utf-8")
 
 
 def decodifica(dados_recebidos):
@@ -54,5 +59,9 @@ def decodifica(dados_recebidos):
 
     if tipo == LISTA:
         return tipo, {}
+
+    if tipo == CONFIRMA:
+        _, tipo_confirmado, nome = campos
+        return tipo, {"tipo_confirmado": tipo_confirmado, "nome": nome}
 
     raise ValueError(f"mensagem desconhecida: {texto}")

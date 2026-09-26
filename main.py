@@ -1,9 +1,6 @@
-# Trabalho GA - Redes de Computadores
-
-# Integrantes: Gabriel marcon e Vitor Kockhann
-
-
 import os
+import time
+import threading
 
 import config
 import protocol
@@ -13,15 +10,60 @@ import file_watcher
 import status_view
 from state import state as estado_rede
 
+_eventos_confirmacao = {}
+_eventos_lock = threading.Lock()
+
+_pedidos_em_andamento = set()
+_pedidos_lock = threading.Lock()
+
 
 def enviar_arquivo(sock, nome, endereco_destino):
     pedacos = file_manager.ler_e_fatiar(nome)
     if not pedacos:
-        pedacos = [(0, b"")] 
+        pedacos = [(0, b"")]
     total = len(pedacos)
     for indice, conteudo in pedacos:
         mensagem = protocol.codifica_dados(nome, indice, total, conteudo)
         network.envia(sock, mensagem, endereco_destino)
+
+
+def _pede_com_retentativas(sock, nome, endereco):
+    try:
+        for tentativa in range(1, config.MAX_TENTATIVAS + 1):
+            network.envia(sock, protocol.codifica_pedir(nome), endereco)
+            time.sleep(config.TIMEOUT_RETRANSMISSAO)
+            if os.path.exists(file_manager.caminho(nome)):
+                return
+        print(f"[!] nao foi possivel obter '{nome}' de {endereco} apos {config.MAX_TENTATIVAS} tentativas")
+    finally:
+        with _pedidos_lock:
+            _pedidos_em_andamento.discard(nome)
+
+
+def _anuncia_ou_remove_com_confirmacao(sock, tipo, nome, peer, monta_mensagem):
+    endereco = (peer["host"], peer["porta"])
+    chave = (peer["id"], tipo, nome)
+    evento = threading.Event()
+    with _eventos_lock:
+        _eventos_confirmacao[chave] = evento
+    try:
+        for tentativa in range(1, config.MAX_TENTATIVAS + 1):
+            network.envia(sock, monta_mensagem(), endereco)
+            if evento.wait(timeout=config.TIMEOUT_RETRANSMISSAO):
+                return
+        print(f"[!] peer {peer['id']} nao confirmou '{tipo} {nome}' apos {config.MAX_TENTATIVAS} tentativas")
+    finally:
+        with _eventos_lock:
+            _eventos_confirmacao.pop(chave, None)
+
+
+def _transmite_com_confirmacao(sock, tipo, nome, peers_destino, monta_mensagem):
+    for peer in peers_destino:
+        threading.Thread(
+            target=_anuncia_ou_remove_com_confirmacao,
+            args=(sock, tipo, nome, peer, monta_mensagem),
+            daemon=True,
+        ).start()
 
 
 def cria_tratador(sock, peers, meu_id):
@@ -35,8 +77,16 @@ def cria_tratador(sock, peers, meu_id):
             nome, tamanho = campos["nome"], campos["tamanho"]
             if peer_id is not None:
                 estado_rede.atualizar_arquivo(peer_id, nome, tamanho)
+            network.envia(sock, protocol.codifica_confirma(protocol.ANUNCIO, nome), endereco)
             if not os.path.exists(file_manager.caminho(nome)):
-                network.envia(sock, protocol.codifica_pedir(nome), endereco)
+                with _pedidos_lock:
+                    ja_buscando = nome in _pedidos_em_andamento
+                    if not ja_buscando:
+                        _pedidos_em_andamento.add(nome)
+                if not ja_buscando:
+                    threading.Thread(
+                        target=_pede_com_retentativas, args=(sock, nome, endereco), daemon=True
+                    ).start()
 
         elif tipo == protocol.PEDIR:
             nome = campos["nome"]
@@ -54,6 +104,7 @@ def cria_tratador(sock, peers, meu_id):
 
         elif tipo == protocol.REMOVIDO:
             nome = campos["nome"]
+            network.envia(sock, protocol.codifica_confirma(protocol.REMOVIDO, nome), endereco)
             file_watcher.marcar_para_ignorar(nome)
             file_manager.apagar_arquivo(nome)
             if peer_id is not None:
@@ -64,6 +115,14 @@ def cria_tratador(sock, peers, meu_id):
             for nome in file_manager.lista_arquivos():
                 tamanho = file_manager.tamanho_arquivo(nome)
                 network.envia(sock, protocol.codifica_anuncio(nome, tamanho), endereco)
+
+        elif tipo == protocol.CONFIRMA:
+            if peer_id is not None:
+                chave = (peer_id, campos["tipo_confirmado"], campos["nome"])
+                with _eventos_lock:
+                    evento = _eventos_confirmacao.get(chave)
+                if evento is not None:
+                    evento.set()
 
     return trata_mensagem
 
@@ -87,20 +146,24 @@ def main():
     def on_arquivo_adicionado(nome):
         tamanho = file_manager.tamanho_arquivo(nome)
         estado_rede.atualizar_arquivo(meu_id, nome, tamanho)
-        network.transmite(sock, protocol.codifica_anuncio(nome, tamanho), outros_peers)
+        _transmite_com_confirmacao(
+            sock, protocol.ANUNCIO, nome, outros_peers,
+            lambda: protocol.codifica_anuncio(nome, tamanho),
+        )
 
     def on_arquivo_removido(nome):
         estado_rede.remover_arquivo(meu_id, nome)
-        network.transmite(sock, protocol.codifica_removido(nome), outros_peers)
+        _transmite_com_confirmacao(
+            sock, protocol.REMOVIDO, nome, outros_peers,
+            lambda: protocol.codifica_removido(nome),
+        )
 
     def _monitor_inatividade():
-        import time
         while True:
             time.sleep(3)
             estado_rede.marcar_visto(meu_id)
             estado_rede.marcar_inativos(timeout_segundos=8)
 
-    import threading
     threading.Thread(target=_monitor_inatividade, daemon=True).start()
 
     file_watcher.inicia_watcher(config.PASTA_TMP, on_arquivo_adicionado, on_arquivo_removido)
