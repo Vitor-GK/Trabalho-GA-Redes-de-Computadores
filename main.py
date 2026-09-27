@@ -40,7 +40,7 @@ def _pede_com_retentativas(sock, nome, endereco):
             _pedidos_em_andamento.discard(nome)
 
 
-def _anuncia_ou_remove_com_confirmacao(sock, tipo, nome, peer, monta_mensagem):
+def _anuncia_ou_remove_com_confirmacao(sock, tipo, nome, peer, monta_mensagem, tamanho=None):
     endereco = (peer["host"], peer["porta"])
     chave = (peer["id"], tipo, nome)
     evento = threading.Event()
@@ -50,6 +50,10 @@ def _anuncia_ou_remove_com_confirmacao(sock, tipo, nome, peer, monta_mensagem):
         for tentativa in range(1, config.MAX_TENTATIVAS + 1):
             network.envia(sock, monta_mensagem(), endereco)
             if evento.wait(timeout=config.TIMEOUT_RETRANSMISSAO):
+                if tipo == protocol.ANUNCIO and tamanho is not None:
+                    estado_rede.atualizar_arquivo(peer["id"], nome, tamanho)
+                elif tipo == protocol.REMOVIDO:
+                    estado_rede.remover_arquivo(peer["id"], nome)
                 return
         print(f"[!] peer {peer['id']} nao confirmou '{tipo} {nome}' apos {config.MAX_TENTATIVAS} tentativas")
     finally:
@@ -57,11 +61,11 @@ def _anuncia_ou_remove_com_confirmacao(sock, tipo, nome, peer, monta_mensagem):
             _eventos_confirmacao.pop(chave, None)
 
 
-def _transmite_com_confirmacao(sock, tipo, nome, peers_destino, monta_mensagem):
+def _transmite_com_confirmacao(sock, tipo, nome, peers_destino, monta_mensagem, tamanho=None):
     for peer in peers_destino:
         threading.Thread(
             target=_anuncia_ou_remove_com_confirmacao,
-            args=(sock, tipo, nome, peer, monta_mensagem),
+            args=(sock, tipo, nome, peer, monta_mensagem, tamanho),
             daemon=True,
         ).start()
 
@@ -149,6 +153,7 @@ def main():
         _transmite_com_confirmacao(
             sock, protocol.ANUNCIO, nome, outros_peers,
             lambda: protocol.codifica_anuncio(nome, tamanho),
+            tamanho=tamanho,
         )
 
     def on_arquivo_removido(nome):
